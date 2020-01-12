@@ -156,19 +156,23 @@ class Ddc:
 		return CapabilitiesParser(out).parse()
 
 	@staticmethod
-	def getvcp(id):
+	def getvcp(display, id):
 		out = subprocess.check_output([
 			"ddcutil",
 			"getvcp",
+			"-d",
+			str(display),
 			str(id),
 		]).decode("utf8")
 		return GetvcpParser(out).parse()
 
 	@staticmethod
-	def setvcp(id, value):
+	def setvcp(display, id, value):
 		subprocess.check_output([
 			"ddcutil",
 			"setvcp",
+			"-d",
+			str(display),
 			str(id),
 			str(value),
 		]).decode("utf8")
@@ -202,7 +206,7 @@ if __name__ == "__main__":
 
 			print("\nQuerying feature...")
 			try:
-				value = Ddc.getvcp(c["id"])
+				value = Ddc.getvcp(d["Display"], c["id"])
 			except subprocess.CalledProcessError as e:
 				print(f"Failed with return code {e.returncode}")
 				if e.stdout is not None:
@@ -211,7 +215,7 @@ if __name__ == "__main__":
 			print(f"Return: {value}")
 			set_value = input("Set new value: ")
 			if set_value:
-				Ddc.setvcp(c["id"], set_value)
+				Ddc.setvcp(d["Display"], c["id"], set_value)
 		except KeyboardInterrupt:
 			print()
 			exit(0)
