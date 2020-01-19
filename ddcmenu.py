@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 import json
+import re
 import subprocess
 
 class DetectParser:
+	DISPLAY_PATTERN = re.compile("Display ([0-9])")
+	ITEM_PATTERN = re.compile("   (.+?): *(.+?)")
+	ITEM_GROUP_PATTERN = re.compile("   (.+?):")
+	ITEM_GROUP_ITEM_PATTERN = re.compile("      (.+?): *(.+?)")
+
 	def __init__(self, input):
 		self._in = input.split("\n")
 
@@ -10,115 +16,110 @@ class DetectParser:
 		self._i = 0
 		products = []
 		while self._i < len(self._in):
-			l = self._peek_line()
-			if not l or l.startswith(" "):
-				self._i += 1
+			l = self._pop_line()
+			m = self.DISPLAY_PATTERN.fullmatch(l)
+			if m is None:
 				continue
-			p = self._parse_header()
-			if p is not None:
-				products += [p]
+			products += [self._parse_display(m)]
 		return products
 
-	def _parse_header(self):
-		l = self._pop_line()
-		if not l.startswith("Display"):
+	def _parse_display(self, m):
+		product = {}
+		product["Display"] = int(m[1])
+
+		def _parse_next(l):
+			item_m = self.ITEM_PATTERN.fullmatch(l)
+			if item_m is not None:
+				return self._parse_item(item_m)
+			group_m = self.ITEM_GROUP_PATTERN.fullmatch(l)
+			if group_m is not None:
+				return self._parse_item_group(group_m)
 			return None
 
-		product = {}
-		product["Display"] = int(l.split(" ")[1])
 		while self._i < len(self._in):
-			l2 = self._peek_line()
-			if not l2.startswith("   "):
-				return product
-			d = self._parse_items(3)
+			l = self._pop_line()
+			d = _parse_next(l)
 			if d:
 				product.update(d)
+			else:
+				self._revert_line()
+				return product
 		return product
 
-	def _parse_items(self, indentation):
-		l = self._pop_line()[indentation:]
-		pair = self._parse_line(l)
-		product = {pair[0]: pair[1]}
+	def _parse_item(self, m):
+		return {m[1]: m[2]}
 
-		if isinstance(pair[1], dict):
-			while self._i < len(self._in):
-				l2 = self._peek_line()
-				next_indentation = indentation + 3
-				if not l2.startswith(" " * next_indentation):
-					return product
-				d = self._parse_items(next_indentation)
-				if d:
-					pair[1].update(d)
+	def _parse_item_group(self, m):
+		d = {}
+		product = {m[1]: d}
+		while self._i < len(self._in):
+			l = self._pop_line()
+			item_m = self.ITEM_GROUP_ITEM_PATTERN.fullmatch(l)
+			if item_m is not None:
+				d.update(self._parse_item(item_m))
+			else:
+				self._revert_line()
+				return product
 		return product
-
-	def _parse_line(self, l):
-		pair = l.split(":")
-		key = pair[0]
-		value = pair[1].strip()
-		if not value:
-			value = {}
-		return (key, value)
 
 	def _pop_line(self):
 		l = self._in[self._i]
 		self._i += 1
 		return l
 
-	def _peek_line(self):
-		return self._in[self._i]
+	def _revert_line(self):
+		self._i -= 1
 
 class CapabilitiesParser:
+	TOPIC_PATTERN = re.compile("VCP Features:")
+	FEATURE_PATTERN = re.compile("   Feature: ([0-9A-F]{2}) \((.+)\)")
+	FEATURE_DESCRIPTION_PATTERN = re.compile("      (.+)")
+
 	def __init__(self, input):
 		self._in = input.split("\n")
 
 	def parse(self):
 		self._i = 0
 		while self._i < len(self._in):
-			l = self._peek_line()
-			if not l or l.startswith(" "):
-				self._pop_line()
+			l = self._pop_line()
+			m = self.TOPIC_PATTERN.fullmatch(l)
+			if m is None:
 				continue
-			product = self._parse_topic()
+			product = self._parse_topic(m)
 			if product is not None:
 				return product
 		return None
 
-	def _parse_topic(self):
-		l = self._pop_line()
-		if not l.startswith("VCP Features:"):
-			return None
-
-		productd = []
+	def _parse_topic(self, m):
+		product = []
 		while self._i < len(self._in):
-			l = self._peek_line()
-			if not l.startswith("   "):
-				return productd
-			d = self._parse_feature()
-			if d:
-				productd += [d]
-		return productd
+			l = self._pop_line()
+			m = self.FEATURE_PATTERN.fullmatch(l)
+			if m is None:
+				self._revert_line()
+				return product
+			product += [self._parse_feature(m)]
+		return product
 
-	def _parse_feature(self):
-		l = self._pop_line()[3:]
-		if not l.startswith("Feature: "):
-			return None
-		pair = l.split(" ")[1:]
+	def _parse_feature(self, m):
 		product = {
-			"id": pair[0],
-			"label": " ".join(pair[1:])[1:-1],
+			"id": m[1],
+			"label": m[2],
 		}
 
 		# look for value description
 		description = []
 		while self._i < len(self._in):
-			l2 = self._peek_line()
-			if l2.startswith("      "):
-				self._i += 1
-				description += [l2[6:]]
+			l = self._pop_line()
+			description_m = self.FEATURE_DESCRIPTION_PATTERN.fullmatch(l)
+			if description_m is not None:
+				description += [description_m[1]]
 			else:
+				self._revert_line()
 				break
 		if description:
 			product["description"] = "\n".join(description)
+		print(product)
 		return product
 
 	def _pop_line(self):
@@ -126,8 +127,8 @@ class CapabilitiesParser:
 		self._i += 1
 		return l
 
-	def _peek_line(self):
-		return self._in[self._i]
+	def _revert_line(self):
+		self._i -= 1
 
 class GetvcpParser:
 	def __init__(self, input):
@@ -180,7 +181,9 @@ class Ddc:
 if __name__ == "__main__":
 	print("Use at your own risk")
 	displays = Ddc.detect()
-	while True:
+	a = True
+	while a:
+		a = False
 		try:
 			print("\nDetected displays:")
 			for i, d in enumerate(displays):
