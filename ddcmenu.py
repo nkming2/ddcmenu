@@ -119,7 +119,6 @@ class CapabilitiesParser:
 				break
 		if description:
 			product["description"] = "\n".join(description)
-		print(product)
 		return product
 
 	def _pop_line(self):
